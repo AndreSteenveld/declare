@@ -1,9 +1,191 @@
-define(["./kernel", "../has", "./lang"], function(dojo, has, lang){
+// Module systems magic dance
+(function (definition) {
+    // RequireJS
+    if (typeof define === "function") {
+        define(definition);
+    // YUI3
+    } else if (typeof YUI === "function") {
+        YUI.add("declare", definition);
+    // CommonJS and <script>
+    } else {
+        definition();
+    }
+})( function( ){
 	// module:
 	//		dojo/_base/declare
 
-	var mix = lang.mixin, op = Object.prototype, opts = op.toString,
-		xtor = new Function, counter = 0, cname = "constructor";
+	var global = this,
+		_extraNames = [ "hasOwnProperty", "valueOf", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString", "toString", "constructor" ],
+		bug_for_in_skips_shadowed = (function( ){
+
+			// if true, the for-in iterator skips object properties that exist in Object's prototype (IE 6 - ?)
+			for(var i in {toString: 1}){
+				return false;
+			}
+			
+			return true;
+
+		})( );
+
+
+	function _mix(dest, source, copyFunc){
+		// summary:
+		//		Copies/adds all properties of source to dest; returns dest.
+		// dest: Object
+		//		The object to which to copy/add all properties contained in source.
+		// source: Object
+		//		The object from which to draw all properties to copy into dest.
+		// copyFunc: Function?
+		//		The process used to copy/add a property in source; defaults to the Javascript assignment operator.
+		// returns:
+		//		dest, as modified
+		// description:
+		//		All properties, including functions (sometimes termed "methods"), excluding any non-standard extensions
+		//		found in Object.prototype, are copied/added to dest. Copying/adding each particular property is
+		//		delegated to copyFunc (if any); copyFunc defaults to the Javascript assignment operator if not provided.
+		//		Notice that by default, _mixin executes a so-called "shallow copy" and aggregate types are copied/added by reference.
+		var name, s, i, empty = {};
+		for(name in source){
+			// the (!(name in empty) || empty[name] !== s) condition avoids copying properties in "source"
+			// inherited from Object.prototype.	 For example, if dest has a custom toString() method,
+			// don't overwrite it with the toString() method that source inherited from Object.prototype
+			s = source[name];
+			if(!(name in dest) || (dest[name] !== s && (!(name in empty) || empty[name] !== s))){
+				dest[name] = copyFunc ? copyFunc(s) : s;
+			}
+		}
+
+		if(bug_for_in_skips_shadowed){
+			if(source){
+				for(i = 0; i < _extraLen; ++i){
+					name = _extraNames[i];
+					s = source[name];
+					if(!(name in dest) || (dest[name] !== s && (!(name in empty) || empty[name] !== s))){
+						dest[name] = copyFunc ? copyFunc(s) : s;
+					}
+				}
+			}
+		}
+
+		return dest; // Object
+	}
+
+	function mix( destination, sources ){
+		// summary:
+		//		Copies/adds all properties of one or more sources to dest; returns dest.
+		// dest: Object
+		//		The object to which to copy/add all properties contained in source. If dest is falsy, then
+		//		a new object is manufactured before copying/adding properties begins.
+		// sources: Object...
+		//		One of more objects from which to draw all properties to copy into dest. sources are processed
+		//		left-to-right and if more than one of these objects contain the same property name, the right-most
+		//		value "wins".
+		// returns: Object
+		//		dest, as modified
+		// description:
+		//		All properties, including functions (sometimes termed "methods"), excluding any non-standard extensions
+		//		found in Object.prototype, are copied/added from sources to dest. sources are processed left to right.
+		//		The Javascript assignment operator is used to copy/add each property; therefore, by default, mixin
+		//		executes a so-called "shallow copy" and aggregate types are copied/added by reference.
+		// example:
+		//		make a shallow copy of an object
+		//	|	var copy = lang.mixin({}, source);
+		// example:
+		//		many class constructors often take an object which specifies
+		//		values to be configured on the object. In this case, it is
+		//		often simplest to call `lang.mixin` on the `this` object:
+		//	|	declare("acme.Base", null, {
+		//	|		constructor: function(properties){
+		//	|			// property configuration:
+		//	|			lang.mixin(this, properties);
+		//	|
+		//	|			console.log(this.quip);
+		//	|			//	...
+		//	|		},
+		//	|		quip: "I wasn't born yesterday, you know - I've seen movies.",
+		//	|		// ...
+		//	|	});
+		//	|
+		//	|	// create an instance of the class and configure it
+		//	|	var b = new acme.Base({quip: "That's what it does!" });
+		// example:
+		//		copy in properties from multiple objects
+		//	|	var flattened = lang.mixin(
+		//	|		{
+		//	|			name: "Frylock",
+		//	|			braces: true
+		//	|		},
+		//	|		{
+		//	|			name: "Carl Brutanananadilewski"
+		//	|		}
+		//	|	);
+		//	|
+		//	|	// will print "Carl Brutanananadilewski"
+		//	|	console.log(flattened.name);
+		//	|	// will print "true"
+		//	|	console.log(flattened.braces);
+
+		if(!dest){ dest = {}; }
+		for(var i = 1, l = arguments.length; i < l; i++){
+			_mix(dest, arguments[i]);
+		}
+		return dest; // Object
+	}
+
+	function getProp(/*Array*/parts, /*Boolean*/create, /*Object*/context){
+		var p, i = 0;
+		if(!context){
+			if(!parts.length){
+				return global;
+			}else{
+				p = parts[i++];
+				context = context || (p in global ? global[p] : (create ? global[p] = {} : undefined));
+			}
+		}
+		while(context && (p = parts[i++])){
+			context = (p in context ? context[p] : (create ? context[p] = {} : undefined));
+		}
+		return context; // mixed
+	}
+
+	function setObject(name, value, context){
+		// summary:
+		//		Set a property from a dot-separated string, such as "A.B.C"
+		// description:
+		//		Useful for longer api chains where you have to test each object in
+		//		the chain, or when you have an object reference in string format.
+		//		Objects are created as needed along `path`. Returns the passed
+		//		value if setting is successful or `undefined` if not.
+		// name: String
+		//		Path to a property, in the form "A.B.C".
+		// value: anything
+		//		value or object to place at location given by name
+		// context: Object?
+		//		Optional. Object to use as root of path. Defaults to
+		//		`dojo.global`.
+		// example:
+		//		set the value of `foo.bar.baz`, regardless of whether
+		//		intermediate objects already exist:
+		//	| lang.setObject("foo.bar.baz", value);
+		// example:
+		//		without `lang.setObject`, we often see code like this:
+		//	| // ensure that intermediate objects are available
+		//	| if(!obj["parent"]){ obj.parent = {}; }
+		//	| if(!obj.parent["child"]){ obj.parent.child = {}; }
+		//	| // now we can safely set the property
+		//	| obj.parent.child.prop = "some value";
+		//		whereas with `lang.setObject`, we can shorten that to:
+		//	| lang.setObject("parent.child.prop", "some value", obj);
+
+		var parts = name.split("."), p = parts.pop(), obj = getProp(parts, true, context);
+		return obj && p ? (obj[p] = value) : undefined; // Object
+	}
+	
+	var op = Object.prototype, 
+		opts = op.toString,
+		xtor = new Function, 
+		counter = 0, 
+		cname = "constructor";
 
 	function err(msg, cls){ throw new Error("declare" + (cls ? " " + cls : "") + ": " + msg); }
 
@@ -204,7 +386,8 @@ define(["./kernel", "../has", "./lang"], function(dojo, has, lang){
 		// intentionally no return if a super method was not found
 	}
 
-	var inheritedImpl = dojo.config.isDebug ? inherited__debug : inherited;
+	//var inheritedImpl = dojo.config.isDebug ? inherited__debug : inherited;
+	var inheritedImpl = inherited;
 
 	// emulation of "instanceof"
 	function isInstanceOf(cls){
@@ -224,8 +407,8 @@ define(["./kernel", "../has", "./lang"], function(dojo, has, lang){
 				target[name] = source[name];
 			}
 		}
-		if(has("bug-for-in-skips-shadowed")){
-			for(var extraNames= lang._extraNames, i= extraNames.length; i;){
+		if(bug_for_in_skips_shadowed){
+			for(var extraNames= _extraNames, i= extraNames.length; i;){
 				name = extraNames[--i];
 				if(name != cname && source.hasOwnProperty(name)){
 					  target[name] = source[name];
@@ -306,7 +489,7 @@ define(["./kernel", "../has", "./lang"], function(dojo, has, lang){
 			}
 		}
 		if(has("bug-for-in-skips-shadowed")){
-			for(var extraNames= lang._extraNames, i= extraNames.length; i;){
+			for(var extraNames= _extraNames, i= extraNames.length; i;){
 				name = extraNames[--i];
 				t = source[name];
 				if((t !== op[name] || !(name in op)) && name != cname){
@@ -817,7 +1000,7 @@ define(["./kernel", "../has", "./lang"], function(dojo, has, lang){
 		// add name if specified
 		if(className){
 			proto.declaredClass = className;
-			lang.setObject(className, ctor);
+			setObject(className, ctor);
 		}
 
 		// build chains and add them to the prototype
@@ -1036,10 +1219,6 @@ define(["./kernel", "../has", "./lang"], function(dojo, has, lang){
 		}
 	};
 	=====*/
-
-	// For back-compat, remove for 2.0
-	dojo.safeMixin = declare.safeMixin = safeMixin;
-	dojo.declare = declare;
 
 	return declare;
 });
